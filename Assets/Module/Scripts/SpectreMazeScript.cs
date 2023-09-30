@@ -275,7 +275,7 @@ public class SpectreMazeScript : MonoBehaviour
                 if (strike)
                 {
                     moduleAudio.PlaySoundAtTransform("MinThird" + new string[] { "C", "Csharp", "D", "Dsharp", "E", "F", "Fsharp", "G", "Gsharp", "A" }.PickRandom(), transform);
-                    Log("A strike was dealt for hitting a wall while attemptin to traverse through edge {0}. The current position is {1}.", x, SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
+                    Log("A strike was dealt for hitting a wall while attempting to traverse through edge {0}. The current position is {1}.", x, SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
                     _maze.HandleFail();
                     Log("The module currently displays {0}.", _maze.GetMemoryText().SkipWhile(y => y == "?").Join("-"));
                     StartCoroutine(DelayStrike(0.25f));

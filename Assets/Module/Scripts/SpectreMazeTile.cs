@@ -616,12 +616,17 @@ public class SpectreMazeTile
 
     public bool Move(int edge)
     {
-        bool? didMove = Traverse(edge);
+        SpectreMazeTile copy = new SpectreMazeTile(this);
+        copy._tileStack = Unlayer(_tileStack, _familiarDepth);
+
+        bool? didMove = copy.Traverse(edge);
 
         if (didMove == null || !(bool)didMove)
         {
             return false;
         }
+
+        Traverse(edge);
 
         UpdateRange();
 
