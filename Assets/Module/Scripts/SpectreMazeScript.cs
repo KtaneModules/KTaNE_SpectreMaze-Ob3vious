@@ -265,7 +265,9 @@ public class SpectreMazeScript : MonoBehaviour
                 if (_holdTimer >= 1)
                     return;
 
-                bool strike = !_maze.Move(x);
+                SpectreMazeTile.TraversalData traversal = _maze.Move(x);
+
+                bool strike = traversal.TravelPermission == null || !(bool)traversal.TravelPermission;
 
                 float angleRad = (15 - SpectreButton.Orientations[x]) / 180f * Mathf.PI;
                 float windStrength = 0.1f / 60;
@@ -275,7 +277,13 @@ public class SpectreMazeScript : MonoBehaviour
                 if (strike)
                 {
                     moduleAudio.PlaySoundAtTransform("MinThird" + new string[] { "C", "Csharp", "D", "Dsharp", "E", "F", "Fsharp", "G", "Gsharp", "A" }.PickRandom(), transform);
-                    Log("A strike was dealt for hitting a wall while attempting to traverse through edge {0}. The current position is {1}.", x, SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
+
+                    if (traversal.ToTile == null)
+                        Log("A strike was dealt for hitting a wall while attempting to traverse through edge {0}, as there is nothing there? The current position is {1}.", traversal.EntryEdge, SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
+                    else if (traversal.TravelPermission == null)
+                        Log("A strike was dealt for entering the unknown while attempting to traverse through edge {0}. Try expanding your range. The current position is {1}.", traversal.EntryEdge, SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
+                    else
+                        Log("A strike was dealt for hitting a wall while attempting to traverse through edge {0}, as it does not pair with edge {1} of {2}. The current position is {3}.", traversal.EntryEdge, traversal.ExitEdge, SpectreMazeTile.ParseStack(traversal.ToTile).Join("-"), SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
                     _maze.HandleFail();
                     Log("The module currently displays {0}.", _maze.GetMemoryText().SkipWhile(y => y == "?").Join("-"));
                     StartCoroutine(DelayStrike(0.25f));

@@ -2,8 +2,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
-using System.Reflection;
-using UnityEngine.Rendering;
 
 public class SpectreMazeTile
 {
@@ -401,23 +399,23 @@ public class SpectreMazeTile
                 positionFinder._tileStack = positions.Dequeue();
                 for (int j = 0; j < 14; j++)
                 {
-                    SpectreMazeTile copy = new SpectreMazeTile(positionFinder);
+                    TraversalData traversal = positionFinder.Traverse(j);
 
-                    bool? foundTile = copy.Traverse(j);
+                    bool? foundTile = traversal.TravelPermission;
                     if (foundTile != null && (bool)foundTile)
                     {
-                        int foundNeighbour = PositionInt(copy._tileStack);
+                        int foundNeighbour = PositionInt(traversal.ToTile);
                         if (!foundTiles[foundNeighbour])
                         {
                             foundTiles[foundNeighbour] = true;
                             foundTileCount++;
 
                             float achievedRatio = (float)foundTileCount / foundTiles.Length;
-                            targetFound |= IsOfType(copy._tileStack, _goalStack);
+                            targetFound |= IsOfType(traversal.ToTile, _goalStack);
 
                             success |= targetFound && achievedRatio >= accessibility;
 
-                            positions.Enqueue(copy._tileStack);
+                            positions.Enqueue(traversal.ToTile);
                         }
                     }
                     if (success)
@@ -435,9 +433,7 @@ public class SpectreMazeTile
 
             for (int i = 0; i < 14; i++)
             {
-                SpectreMazeTile copy = new SpectreMazeTile(this);
-
-                needsExpanding |= copy.Traverse(i) == null;
+                needsExpanding |= Traverse(i).TravelPermission == null;
             }
 
             if (needsExpanding)
@@ -514,7 +510,7 @@ public class SpectreMazeTile
         throw new InvalidOperationException("Unable to find a new layer");
     }
 
-    public bool? Traverse(int edge)
+    public TraversalData Traverse(int edge)
     {
         Stack<int> stack = new Stack<int>(new Stack<int>(_tileStack));
 
@@ -543,13 +539,7 @@ public class SpectreMazeTile
 
             int targetEdgeIndex = Enumerable.Range(0, 14).First(x => _lowestUpperTransitions[metaTile][newTile][x] == currentTile + 6 && _lowestLowerTransitions[metaTile][newTile][x] == 3 - oldEdge);
 
-            if (!GetEdgePath(edge, targetEdgeIndex))
-                return false;
-            else
-            {
-                _tileStack = stack;
-                return true;
-            }
+            return new TraversalData(_tileStack, stack, edge, targetEdgeIndex, 0, GetEdgePath(edge, targetEdgeIndex));
         }
 
         int newEdge = _lowestEdgeMax[metaTile][newTile] - oldEdge;
@@ -562,7 +552,7 @@ public class SpectreMazeTile
 
             //if unlayering escalates
             if (tileTypes.Count == 0)
-                return null;
+                return new TraversalData(_tileStack, null, edge, -1, -1, null);
 
             currentTile = stack.Pop();
             metaTile = tileTypes.Pop();
@@ -584,8 +574,11 @@ public class SpectreMazeTile
 
         currentTile = Array.IndexOf(_upperTransitions[metaTile][newTile], currentTile + 6);
 
+        int layer = 0;
+
         while (true)
         {
+            layer++;
             stack.Push(newTile);
 
             metaTile = _metaTileStructure[metaTile][newTile];
@@ -605,28 +598,29 @@ public class SpectreMazeTile
         //NOTE fuck Gamma in particular (upside down L plus ratio)
         stack.Push(metaTile == 0 ? _gammaFuckery[currentTile][newEdge] : 0);
 
-        if (!GetEdgePath(edge, finalEdgeIndex))
-            return false;
-        else
-        {
-            _tileStack = stack;
-            return true;
-        }
+        return new TraversalData(_tileStack, stack, edge, finalEdgeIndex, layer, GetEdgePath(edge, finalEdgeIndex));
     }
 
-    public bool Move(int edge)
+    public TraversalData Move(int edge)
     {
-        SpectreMazeTile copy = new SpectreMazeTile(this);
-        copy._tileStack = Unlayer(_tileStack, _familiarDepth);
+        TraversalData traversal = Traverse(edge);
 
-        bool? didMove = copy.Traverse(edge);
-
-        if (didMove == null || !(bool)didMove)
+        if (traversal.Layer < 0)
         {
-            return false;
+            return new TraversalData(traversal.FromTile, null, traversal.EntryEdge, -1, -1, null);
         }
 
-        Traverse(edge);
+        if (traversal.Layer >= _familiarDepth)
+        {
+            return new TraversalData(traversal.FromTile, traversal.ToTile, traversal.EntryEdge, -1, -1, null);
+        }
+
+        if (!(bool)traversal.TravelPermission)
+        {
+            return traversal;
+        }
+
+        _tileStack = traversal.ToTile;
 
         UpdateRange();
 
@@ -636,7 +630,7 @@ public class SpectreMazeTile
         else
             CurrentMemory = null;
 
-        return true;
+        return traversal;
     }
 
     public void HandleFail()
@@ -648,10 +642,8 @@ public class SpectreMazeTile
     {
         for (int i = 0; i < trial.Length; i++)
         {
-            SpectreMazeTile copy = new SpectreMazeTile(this);
-            copy._tileStack = Unlayer(_tileStack, _familiarDepth);
-
-            if (trial[i] ^ (copy.Traverse(i) == null))
+            TraversalData traversal = Traverse(i);
+            if (trial[i] ^ (traversal.Layer < 0 || traversal.Layer >= _familiarDepth))
                 return false;
         }
 
@@ -664,10 +656,8 @@ public class SpectreMazeTile
         List<int> edges = new List<int>();
         for (int i = 0; i < 14; i++)
         {
-            SpectreMazeTile copy = new SpectreMazeTile(this);
-            copy._tileStack = Unlayer(_tileStack, _familiarDepth);
-
-            if (copy.Traverse(i) == null)
+            TraversalData traversal = Traverse(i);
+            if (traversal.Layer < 0 || traversal.Layer >= _familiarDepth)
                 edges.Add(i);
         }
 
@@ -768,20 +758,19 @@ public class SpectreMazeTile
             positionFinder._tileStack = positions[i];
             for (int j = 0; j < 14; j++)
             {
-                SpectreMazeTile copy = new SpectreMazeTile(positionFinder);
+                TraversalData traversal = positionFinder.Traverse(j);
 
-                bool? foundTile = copy.Traverse(j);
-                if (foundTile != null && (bool)foundTile)
+                if (traversal.TravelPermission != null && (bool)traversal.TravelPermission)
                 {
-                    int foundNeighbour = positions.Skip(oldestNeighbour[i]).IndexOf(x => x.SequenceEqual(copy._tileStack));
+                    int foundNeighbour = positions.Skip(oldestNeighbour[i]).IndexOf(x => x.SequenceEqual(traversal.ToTile));
                     if (foundNeighbour == -1)
                     {
                         List<int> newPath = paths[i].Concat(new int[] { j }).ToList();
 
-                        if (IsOfType(copy._tileStack, _goalStack))
+                        if (IsOfType(traversal.ToTile, _goalStack))
                             return newPath;
 
-                        positions.Add(copy._tileStack);
+                        positions.Add(traversal.ToTile);
                         paths.Add(newPath);
                         oldestNeighbour.Add(i);
                     }
@@ -952,6 +941,26 @@ public class SpectreMazeTile
         }
     }
 
+    public struct TraversalData
+    {
+        public Stack<int> FromTile { get; private set; }
+        public Stack<int> ToTile { get; private set; }
+        public int EntryEdge { get; private set; }
+        public int ExitEdge { get; private set; }
+        public int Layer { get; private set; }
+        public bool? TravelPermission { get; private set; }
+
+        public TraversalData(Stack<int> fromTile, Stack<int> toTile, int entryEdge, int exitEdge, int layer, bool? travelPermission)
+        {
+            FromTile = fromTile;
+            ToTile = toTile;
+            EntryEdge = entryEdge;
+            ExitEdge = exitEdge;
+            Layer = layer;
+            TravelPermission = travelPermission;
+        }
+    }
+
     private static List<T> Shuffle<T>(List<T> list, System.Random rng)
     {
         for (int i = 0; i < list.Count; i++)
@@ -1065,10 +1074,9 @@ public class SpectreMazeTile
 
                     for (int j = 0; j < 14; j++)
                     {
-                        SpectreMazeTile copy = new SpectreMazeTile(positionFinder);
+                        TraversalData traversal = positionFinder.Traverse(j);
 
-                        bool? foundTile = copy.Traverse(j);
-                        if (foundTile == null)
+                        if (traversal.TravelPermission == null)
                         {
                             int originalGroup = tileGroups[i];
 
@@ -1079,9 +1087,9 @@ public class SpectreMazeTile
                                 if (tileGroups[k] == originalGroup)
                                     tileGroups[k] = -1;
                         }
-                        else if ((bool)foundTile)
+                        else if ((bool)traversal.TravelPermission)
                         {
-                            int foundNeighbour = PositionInt(copy._tileStack);
+                            int foundNeighbour = PositionInt(traversal.ToTile);
                             if (tileGroups[foundNeighbour] > tileGroups[i])
                             {
                                 int originalGroup = tileGroups[foundNeighbour];
