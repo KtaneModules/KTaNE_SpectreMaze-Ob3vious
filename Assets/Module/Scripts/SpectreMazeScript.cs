@@ -119,7 +119,7 @@ public class SpectreMazeScript : MonoBehaviour
 
         _thread = new Thread(() =>
         {
-            _maze = SpectreMazeTile.Generate(4, 0.5f, rng);
+            _maze = SpectreMazeTile.Generate(4, 64, 80, rng);
         });
         _thread.Start();
 
@@ -496,6 +496,7 @@ public class SpectreMazeScript : MonoBehaviour
         {
             if (SpectreMazeTile.IsOfType(_maze.GetStack(), _maze.GetGoal()))
             {
+                yield return SetSelection(new bool[14]);
                 _state = ModuleState.Ready;
                 GetComponent<KMSelectable>().Children[0].OnInteract();
                 break;
@@ -510,27 +511,13 @@ public class SpectreMazeScript : MonoBehaviour
             while (_solverPath == null)
                 yield return true;
 
-
-            for (int i = 0; i < 14; i++)
-                if (_selected[i])
-                {
-                    _state = ModuleState.Ready;
-                    _buttons[i].Selectable.OnHighlight();
-                    _buttons[i].Selectable.OnInteract();
-
-                    _state = ModuleState.Autosolving;
-                    yield return new WaitForSeconds(0.1f);
-
-                    _state = ModuleState.Ready;
-                    _buttons[i].Selectable.OnInteractEnded();
-                    _buttons[i].Selectable.OnHighlightEnded();
-
-                    _state = ModuleState.Autosolving;
-                    yield return new WaitForSeconds(0.1f);
-                }
-
             foreach (int index in _solverPath)
             {
+                while (_maze.Traverse(index).Layer >= _maze.GetFamiliarDepth())
+                    yield return SetSelection(Enumerable.Range(0, 14).Select(x => _maze.GetUnknownEdges().Contains(x)).ToArray());
+
+                yield return SetSelection(new bool[14]);
+
                 _state = ModuleState.Ready;
                 _buttons[index].Selectable.OnHighlight();
                 _buttons[index].Selectable.OnInteract();
@@ -570,6 +557,54 @@ public class SpectreMazeScript : MonoBehaviour
 
         _isUsingThreads = false;
         _thread = null;
+    }
+
+    private IEnumerator SetSelection(bool[] selection)
+    {
+        for (int i = 0; i < 14; i++)
+            if (!_selected[i] && selection[i])
+            {
+                _state = ModuleState.Ready;
+                _buttons[i].Selectable.OnHighlight();
+                _buttons[i].Selectable.OnInteract();
+
+                _state = ModuleState.Autosolving;
+                yield return new WaitForSeconds(0.1f);
+                yield return new WaitUntil(() => _selected.Any(x => x));
+
+                _state = ModuleState.Ready;
+                _buttons[i].Selectable.OnInteractEnded();
+                _buttons[i].Selectable.OnHighlightEnded();
+
+                _state = ModuleState.Autosolving;
+                yield return new WaitForSeconds(0.1f);
+            }
+
+        for (int i = 0; i < 14; i++)
+            if (_selected[i] && !selection[i])
+            {
+                _state = ModuleState.Ready;
+                _buttons[i].Selectable.OnHighlight();
+                _buttons[i].Selectable.OnInteract();
+
+                _state = ModuleState.Autosolving;
+                yield return new WaitForSeconds(0.1f);
+
+                _state = ModuleState.Ready;
+                _buttons[i].Selectable.OnInteractEnded();
+                _buttons[i].Selectable.OnHighlightEnded();
+
+                _state = ModuleState.Autosolving;
+                yield return new WaitForSeconds(0.1f);
+            }
+
+        if (_selected.Any(x => x))
+        {
+            _state = ModuleState.Ready;
+            GetComponent<KMSelectable>().Children[0].OnInteract();
+            _state = ModuleState.Autosolving;
+            yield return new WaitForSeconds(0.1f);
+        }
     }
 
     private void Log(string format, params object[] args)

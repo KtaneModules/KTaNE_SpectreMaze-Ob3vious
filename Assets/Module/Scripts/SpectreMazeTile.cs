@@ -198,34 +198,34 @@ public class SpectreMazeTile
                 _edges[i, j] = old._edges[i, j];
     }
 
-    private SpectreMazeTile(Stack<int> tileStack, Stack<int> goalStack, float accessibility, System.Random rng)
+    private SpectreMazeTile(Stack<int> tileStack, int lowerWeightedDistance, int upperWeightedDistance, System.Random rng)
     {
         _rng = rng;
 
         CurrentMemory = null;
 
         _tileStack = tileStack;
-        _goalStack = goalStack;
+        SetWalls(tileStack.Count - 1, lowerWeightedDistance, upperWeightedDistance);
+
         _memoryPoints = new List<MemoryPoint>();
 
         _familiarDepth = 2;
         UpdateRange();
         AddMemory();
 
-        SetWalls(tileStack.Count - 1, accessibility);
+        
         //for (int i = 0; i < 49; i++)
         //    _edges[i / 7, i % 7] = true;
     }
 
     private SpectreMazeTile() { }
 
-    public static SpectreMazeTile Generate(int layerCount, float accessibility, System.Random rng)
+    public static SpectreMazeTile Generate(int layerCount, int lowerWeightedDistance, int upperWeightedDistance, System.Random rng)
     {
         if (_nerfedSetups == null)
             GenerateNerfSetups();
 
         Stack<int> tileStack = new Stack<int>();
-        Stack<int> goalStack = new Stack<int>();
         int selected = 0;
         int rnd = rng.Next(_highestLayerWeights.Sum());
         while (rnd >= _highestLayerWeights[selected])
@@ -239,55 +239,11 @@ public class SpectreMazeTile
 
         layerCount--;
 
-        int goalSelected = -1;
-        int goalRnd = -1;
-        int goalLastType = lastType;
-
-        if (layerCount > 0)
-        {
-            while (true)
-            {
-                rnd = rng.Next(GetSubtiles(layerCount, lastType == 0));
-                goalRnd = rng.Next(GetSubtiles(layerCount, goalLastType == 0));
-
-                int tempSelected = 0;
-                int tempGoalSelected = 0;
-
-                while (rnd >= GetSubtiles(layerCount - 1, _metaTileStructure[lastType][tempSelected] == 0))
-                {
-                    rnd -= GetSubtiles(layerCount - 1, _metaTileStructure[lastType][tempSelected] == 0);
-                    tempSelected++;
-                }
-
-                while (goalRnd >= GetSubtiles(layerCount - 1, _metaTileStructure[goalLastType][tempGoalSelected] == 0))
-                {
-                    goalRnd -= GetSubtiles(layerCount - 1, _metaTileStructure[goalLastType][tempGoalSelected] == 0);
-                    tempGoalSelected++;
-                }
-
-                if (_metaTileStructure[lastType][tempSelected] == _metaTileStructure[goalLastType][tempGoalSelected])
-                    continue;
-
-                selected = tempSelected;
-                goalSelected = tempGoalSelected;
-
-                lastType = _metaTileStructure[lastType][selected];
-                tileStack.Push(selected);
-
-                goalLastType = _metaTileStructure[goalLastType][goalSelected];
-                goalStack.Push(goalLastType);
-
-                layerCount--;
-
-                break;
-            }
-
-        }
+        rnd = rng.Next(GetSubtiles(layerCount, lastType == 0));
 
         while (layerCount > 0)
         {
             selected = 0;
-            goalSelected = 0;
 
             while (rnd >= GetSubtiles(layerCount - 1, _metaTileStructure[lastType][selected] == 0))
             {
@@ -295,25 +251,15 @@ public class SpectreMazeTile
                 selected++;
             }
 
-            while (goalRnd >= GetSubtiles(layerCount - 1, _metaTileStructure[goalLastType][goalSelected] == 0))
-            {
-                goalRnd -= GetSubtiles(layerCount - 1, _metaTileStructure[goalLastType][goalSelected] == 0);
-                goalSelected++;
-            }
-
             lastType = _metaTileStructure[lastType][selected];
             tileStack.Push(selected);
-
-            goalLastType = _metaTileStructure[goalLastType][goalSelected];
-            goalStack.Push(goalSelected);
 
             layerCount--;
         }
 
         tileStack.Push(rnd);
-        goalStack.Push(goalRnd);
 
-        SpectreMazeTile tile = new SpectreMazeTile(tileStack, goalStack, accessibility, rng);
+        SpectreMazeTile tile = new SpectreMazeTile(tileStack, lowerWeightedDistance, upperWeightedDistance, rng);
 
         return tile;
     }
@@ -362,6 +308,101 @@ public class SpectreMazeTile
         _nerfedSetups = candidates.ToArray();
     }
 
+    private void SetWalls(int calculationDepth, int lowerBound, int upperBound)
+    {
+        int[][] links = new int[][] { new int[] { 0, 43 }, new int[] { 2, 8, 14 }, new int[] { 3, 9, 15, 21 }, new int[] { 4, 10, 22 }, new int[] { 13, 19, 37 }, new int[] { 18, 30 }, new int[] { 20, 26, 38, 44 }, new int[] { 25, 31 }, new int[] { 27, 39, 45 }, new int[] { 28 }, new int[] { 32 }, new int[] { 33 }, new int[] { 35, 48 } };
+
+        int[] options = links.Select(x => PickRandom(x, _rng)).ToArray();
+
+        Queue<bool[]> mazes = new Queue<bool[]>(Shuffle(_nerfedSetups.ToList(), _rng));
+
+        while (mazes.Count > 0)
+        {
+            bool[] maze = mazes.Dequeue();
+
+            for (int i = 0; i < options.Length; i++)
+            {
+                int option = options[i];
+
+                _edges[option / 7, option % 7] = maze[i];
+            }
+
+            SpectreMazeTile positionFinder = new SpectreMazeTile(this);
+
+            List<Stack<int>> candidateVetoes = new List<Stack<int>>();
+            List<Stack<int>> candidateTargets = new List<Stack<int>>();
+
+            List<Queue<Stack<int>>> positions = new List<Queue<Stack<int>>> { new Queue<Stack<int>>() };
+
+            int[] foundTiles = Enumerable.Range(0, GetSubtiles(calculationDepth - 1, Unlayer(_tileStack, calculationDepth).Last() == 0)).Select(_ => -1).ToArray();
+            foundTiles[PositionInt(Unlayer(positionFinder._tileStack, calculationDepth))] = 0;
+
+            positions[0].Enqueue(positionFinder._tileStack);
+
+            for (int i = 0; i < positions.Count; i++)
+            {
+                while (positions[i].Count > 0)
+                {
+                    positionFinder._tileStack = positions[i].Dequeue();
+
+                    int posInt = PositionInt(Unlayer(positionFinder._tileStack, calculationDepth));
+                    if (foundTiles[posInt] < 0)
+                        continue;
+
+                    foundTiles[posInt] = -1;
+
+                    if (i >= lowerBound)
+                        candidateTargets.Add(Unlayer(positionFinder._tileStack, calculationDepth - 1));
+                    else
+                        candidateVetoes.Add(Unlayer(positionFinder._tileStack, calculationDepth - 1));
+
+                    for (int j = 0; j < 14; j++)
+                    {
+                        TraversalData traversal = positionFinder.Traverse(j);
+
+                        if (traversal.Layer >= calculationDepth)
+                            continue;
+
+                        bool? foundTile = traversal.TravelPermission;
+                        if (foundTile == null || !(bool)foundTile)
+                            continue;
+
+                        int traversalScore = traversal.Layer * (traversal.Layer + 1) / 2 + 1;
+                        if (traversalScore + i >= upperBound)
+                            continue;
+
+                        int newPosInt = PositionInt(Unlayer(traversal.ToTile, calculationDepth));
+                        if (foundTiles[newPosInt] > 0 && traversalScore + i >= foundTiles[newPosInt])
+                            continue;
+
+                        foundTiles[newPosInt] = traversalScore + i;
+
+                        while (positions.Count <= traversalScore + i)
+                            positions.Add(new Queue<Stack<int>>());
+
+                        positions[traversalScore + i].Enqueue(traversal.ToTile);
+                    }
+                }
+            }
+
+            if (candidateTargets.Count <= 0)
+            {
+                continue;
+            }
+
+            Shuffle(candidateTargets, _rng);
+
+            foreach (Stack<int> candidate in candidateTargets)
+            {
+                if (candidateVetoes.Any(x => x.SequenceEqual(candidate)))
+                    continue;
+
+                _goalStack = candidate;
+                return;
+            }
+        }
+    }
+
     private void SetWalls(int calculationDepth, float accessibility)
     {
         int[][] links = new int[][] { new int[] { 0, 43 }, new int[] { 2, 8, 14 }, new int[] { 3, 9, 15, 21 }, new int[] { 4, 10, 22 }, new int[] { 13, 19, 37 }, new int[] { 18, 30 }, new int[] { 20, 26, 38, 44 }, new int[] { 25, 31 }, new int[] { 27, 39, 45 }, new int[] { 28 }, new int[] { 32 }, new int[] { 33 }, new int[] { 35, 48 } };
@@ -382,7 +423,6 @@ public class SpectreMazeTile
             }
 
             SpectreMazeTile positionFinder = new SpectreMazeTile(this);
-            positionFinder._tileStack = Unlayer(_tileStack, calculationDepth);
 
             bool targetFound = false;
             bool success = false;
@@ -401,7 +441,7 @@ public class SpectreMazeTile
                 {
                     TraversalData traversal = positionFinder.Traverse(j);
 
-                    bool? foundTile = traversal.TravelPermission;
+                    bool? foundTile = traversal.Layer < calculationDepth ? traversal.TravelPermission : null;
                     if (foundTile != null && (bool)foundTile)
                     {
                         int foundNeighbour = PositionInt(traversal.ToTile);
@@ -713,6 +753,11 @@ public class SpectreMazeTile
     public Stack<int> GetGoal()
     {
         return _goalStack;
+    }
+
+    public int GetFamiliarDepth()
+    {
+        return _familiarDepth;
     }
 
     //to bias to subtiles
