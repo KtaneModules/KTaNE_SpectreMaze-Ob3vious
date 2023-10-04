@@ -205,15 +205,21 @@ public class SpectreMazeTile
         CurrentMemory = null;
 
         _tileStack = tileStack;
-        SetWalls(tileStack.Count - 1, lowerWeightedDistance, upperWeightedDistance);
+        int layer = tileStack.Count - 1;
 
         _memoryPoints = new List<MemoryPoint>();
+        UpdateRange();
+
+        while (TransitionScore(_tileStack.Count - 1) < upperWeightedDistance)
+            AddLayer();
+
+        SetWalls(layer, lowerWeightedDistance, upperWeightedDistance);
 
         _familiarDepth = 2;
-        UpdateRange();
+
         AddMemory();
 
-        
+
         //for (int i = 0; i < 49; i++)
         //    _edges[i / 7, i % 7] = true;
     }
@@ -227,11 +233,15 @@ public class SpectreMazeTile
 
         Stack<int> tileStack = new Stack<int>();
         int selected = 0;
-        int rnd = rng.Next(_highestLayerWeights.Sum());
-        while (rnd >= _highestLayerWeights[selected])
+        float rnd1 = (float)rng.NextDouble() * _highestLayerWeights.Sum();
+        while (rnd1 >= _highestLayerWeights[selected])
         {
-            rnd -= _highestLayerWeights[selected];
+            rnd1 -= _highestLayerWeights[selected];
             selected++;
+
+            //fallback for that one time it may overflow
+            if (selected > 8)
+                selected = 0;
         }
         int lastType = selected;
 
@@ -239,15 +249,15 @@ public class SpectreMazeTile
 
         layerCount--;
 
-        rnd = rng.Next(GetSubtiles(layerCount, lastType == 0));
+        int rnd2 = rng.Next(GetSubtiles(layerCount, lastType == 0));
 
         while (layerCount > 0)
         {
             selected = 0;
 
-            while (rnd >= GetSubtiles(layerCount - 1, _metaTileStructure[lastType][selected] == 0))
+            while (rnd2 >= GetSubtiles(layerCount - 1, _metaTileStructure[lastType][selected] == 0))
             {
-                rnd -= GetSubtiles(layerCount - 1, _metaTileStructure[lastType][selected] == 0);
+                rnd2 -= GetSubtiles(layerCount - 1, _metaTileStructure[lastType][selected] == 0);
                 selected++;
             }
 
@@ -257,7 +267,7 @@ public class SpectreMazeTile
             layerCount--;
         }
 
-        tileStack.Push(rnd);
+        tileStack.Push(rnd2);
 
         SpectreMazeTile tile = new SpectreMazeTile(tileStack, lowerWeightedDistance, upperWeightedDistance, rng);
 
@@ -308,6 +318,10 @@ public class SpectreMazeTile
         _nerfedSetups = candidates.ToArray();
     }
 
+    public int TransitionScore(int layer)
+    {
+        return layer * (layer + 1) / 2 + 1;
+    }
     private void SetWalls(int calculationDepth, int lowerBound, int upperBound)
     {
         int[][] links = new int[][] { new int[] { 0, 43 }, new int[] { 2, 8, 14 }, new int[] { 3, 9, 15, 21 }, new int[] { 4, 10, 22 }, new int[] { 13, 19, 37 }, new int[] { 18, 30 }, new int[] { 20, 26, 38, 44 }, new int[] { 25, 31 }, new int[] { 27, 39, 45 }, new int[] { 28 }, new int[] { 32 }, new int[] { 33 }, new int[] { 35, 48 } };
@@ -315,6 +329,11 @@ public class SpectreMazeTile
         int[] options = links.Select(x => PickRandom(x, _rng)).ToArray();
 
         Queue<bool[]> mazes = new Queue<bool[]>(Shuffle(_nerfedSetups.ToList(), _rng));
+
+        int finalStackDepth = calculationDepth - 1;
+
+        while (TransitionScore(calculationDepth) < upperBound)
+            calculationDepth++;
 
         while (mazes.Count > 0)
         {
@@ -334,7 +353,7 @@ public class SpectreMazeTile
 
             List<Queue<Stack<int>>> positions = new List<Queue<Stack<int>>> { new Queue<Stack<int>>() };
 
-            int[] foundTiles = Enumerable.Range(0, GetSubtiles(calculationDepth - 1, Unlayer(_tileStack, calculationDepth).Last() == 0)).Select(_ => -1).ToArray();
+            Dictionary<int, int> foundTiles = new Dictionary<int, int>();
             foundTiles[PositionInt(Unlayer(positionFinder._tileStack, calculationDepth))] = 0;
 
             positions[0].Enqueue(positionFinder._tileStack);
@@ -352,9 +371,9 @@ public class SpectreMazeTile
                     foundTiles[posInt] = -1;
 
                     if (i >= lowerBound)
-                        candidateTargets.Add(Unlayer(positionFinder._tileStack, calculationDepth - 1));
+                        candidateTargets.Add(Unlayer(positionFinder._tileStack, finalStackDepth));
                     else
-                        candidateVetoes.Add(Unlayer(positionFinder._tileStack, calculationDepth - 1));
+                        candidateVetoes.Add(Unlayer(positionFinder._tileStack, finalStackDepth));
 
                     for (int j = 0; j < 14; j++)
                     {
@@ -367,15 +386,17 @@ public class SpectreMazeTile
                         if (foundTile == null || !(bool)foundTile)
                             continue;
 
-                        int traversalScore = traversal.Layer * (traversal.Layer + 1) / 2 + 1;
+                        int traversalScore = TransitionScore(traversal.Layer);
                         if (traversalScore + i >= upperBound)
                             continue;
 
                         int newPosInt = PositionInt(Unlayer(traversal.ToTile, calculationDepth));
-                        if (foundTiles[newPosInt] > 0 && traversalScore + i >= foundTiles[newPosInt])
+                        if (!foundTiles.ContainsKey(newPosInt))
+                            foundTiles.Add(newPosInt, traversalScore + i);
+                        else if (traversalScore + i >= foundTiles[newPosInt])
                             continue;
-
-                        foundTiles[newPosInt] = traversalScore + i;
+                        else
+                            foundTiles[newPosInt] = traversalScore + i;
 
                         while (positions.Count <= traversalScore + i)
                             positions.Add(new Queue<Stack<int>>());
@@ -487,34 +508,25 @@ public class SpectreMazeTile
         }
     }
 
-    //close enough, but once again, fuck gamma for not getting us the same probabilities each layer
-    private static readonly int[][] _layerUpWeights =
-    {
-        new int[]{3528,3528,504,441,2656,2663,3528,6111,4761},
-        new int[]{3528,3528,504,441,2656,2663,3528,6111,4761},
-        new int[]{1,0,0,0,0,0,0,0,0},
-        new int[]{0,0,0,0,0,0,1,0,0},
-        new int[]{3528,7056,0,441,0,2663,7056,0,0},
-        new int[]{3528,3528,1008,441,2656,0,3528,6111,0},
-        new int[]{3528,3528,504,441,2656,2663,3528,6111,4761},
-        new int[]{1764,3528,504,441,2656,2663,1764,6111,4761},
-        new int[]{0,0,504,441,5312,5326,0,12222,14283}
-    };
-    //same for this one vvv
-    private static readonly int[] _highestLayerWeights = { 3528, 3528, 504, 441, 2656, 2663, 3528, 6111, 4761 };
+    //these appear to be irrational I can't really make it better than this
+    private static readonly float[] _highestLayerWeights = { .127016653793f, .127016653793f, .016133230341f, .016133230341f, .094750193111f, .094750193111f, .127016653793f, .221766846904f, .175416344815f };
 
     private void AddLayer()
     {
         Stack<int> reverseCopy = new Stack<int>(_tileStack);
         int type = reverseCopy.Pop();
-        int[] layerUpWeight = _layerUpWeights[type];
+        float[] layerUpWeight = _metaTileStructure.Select((x, ix) => x.Count(y => y == type) * _highestLayerWeights[ix]).ToArray();
 
         int parent = 0;
-        int rnd = _rng.Next(layerUpWeight.Sum());
+        float rnd = (float)_rng.NextDouble() * layerUpWeight.Sum();
         while (rnd >= layerUpWeight[parent])
         {
             rnd -= layerUpWeight[parent];
             parent++;
+
+            //fallback for that one time it may overflow
+            if (parent > 8)
+                parent = 0;
         }
 
         int index = PickRandom(Enumerable.Range(0, _metaTileStructure[parent].Length).Where(x => _metaTileStructure[parent][x] == type), _rng);
