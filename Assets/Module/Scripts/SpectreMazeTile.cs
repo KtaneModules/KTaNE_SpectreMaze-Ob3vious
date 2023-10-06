@@ -198,7 +198,7 @@ public class SpectreMazeTile
                 _edges[i, j] = old._edges[i, j];
     }
 
-    private SpectreMazeTile(Stack<int> tileStack, int lowerWeightedDistance, int upperWeightedDistance, System.Random rng)
+    private SpectreMazeTile(Stack<int> tileStack, int lowerWeightedDistance, int upperWeightedDistance, int porosity, System.Random rng)
     {
         _rng = rng;
 
@@ -213,7 +213,7 @@ public class SpectreMazeTile
         while (TransitionScore(_tileStack.Count - 1) < upperWeightedDistance)
             AddLayer();
 
-        SetWalls(layer, lowerWeightedDistance, upperWeightedDistance);
+        SetWalls(layer, lowerWeightedDistance, upperWeightedDistance, porosity);
 
         _familiarDepth = 2;
 
@@ -226,10 +226,9 @@ public class SpectreMazeTile
 
     private SpectreMazeTile() { }
 
-    public static SpectreMazeTile Generate(int layerCount, int lowerWeightedDistance, int upperWeightedDistance, System.Random rng)
+    public static SpectreMazeTile Generate(int layerCount, int lowerWeightedDistance, int upperWeightedDistance, int porosity, System.Random rng)
     {
-        if (_nerfedSetups == null)
-            GenerateNerfSetups();
+        GenerateNerfSetups(porosity);
 
         Stack<int> tileStack = new Stack<int>();
         int selected = 0;
@@ -269,66 +268,74 @@ public class SpectreMazeTile
 
         tileStack.Push(rnd2);
 
-        SpectreMazeTile tile = new SpectreMazeTile(tileStack, lowerWeightedDistance, upperWeightedDistance, rng);
+        SpectreMazeTile tile = new SpectreMazeTile(tileStack, lowerWeightedDistance, upperWeightedDistance, porosity, rng);
 
         return tile;
     }
 
-    public static void GenerateNerfSetups()
+    public static void GenerateNerfSetups(int porosity)
     {
-        List<bool[]> candidates = new List<bool[]>();
+        if (_nerfedSetups.Count == 0)
+            _nerfedSetups.Add(_possibleSetups);
 
-        foreach (bool[] setup in _possibleSetups)
-            for (int i = 0; i < 13; i++)
-            {
-                if (setup[i])
-                    continue;
+        while (_nerfedSetups.Count <= porosity)
+        {
+            List<bool[]> candidates = new List<bool[]>();
 
-                bool[] newSetup = Enumerable.Range(0, 13).Select(x => x == i || setup[x]).ToArray();
+            bool[][] setups = _nerfedSetups.Last();
 
-                if (candidates.Any(x => x.SequenceEqual(newSetup)))
-                    continue;
-
-                bool safe = true;
-                foreach (bool[] setup2 in _possibleSetups)
+            foreach (bool[] setup in setups)
+                for (int i = 0; i < 13; i++)
                 {
-                    int diff = 0;
-                    for (int j = 0; j < 13; j++)
-                        if (newSetup[j] && !setup2[j])
-                            diff++;
-                        else if (!newSetup[j] && setup2[j])
+                    if (setup[i])
+                        continue;
+
+                    bool[] newSetup = Enumerable.Range(0, 13).Select(x => x == i || setup[x]).ToArray();
+
+                    if (candidates.Any(x => x.SequenceEqual(newSetup)))
+                        continue;
+
+                    bool safe = true;
+                    foreach (bool[] setup2 in setups)
+                    {
+                        int diff = 0;
+                        for (int j = 0; j < 13; j++)
+                            if (newSetup[j] && !setup2[j])
+                                diff++;
+                            else if (!newSetup[j] && setup2[j])
+                            {
+                                diff = 0;
+                                break;
+                            }
+
+                        if (diff >= 2)
                         {
-                            diff = 0;
+                            safe = false;
                             break;
                         }
-
-                    if (diff >= 2)
-                    {
-                        safe = false;
-                        break;
                     }
+
+                    if (!safe)
+                        continue;
+
+                    candidates.Add(newSetup);
                 }
 
-                if (!safe)
-                    continue;
-
-                candidates.Add(newSetup);
-            }
-
-        _nerfedSetups = candidates.ToArray();
+            _nerfedSetups.Add(candidates.ToArray());
+        }
     }
 
     public int TransitionScore(int layer)
     {
         return layer * (layer + 1) / 2 + 1;
     }
-    private void SetWalls(int calculationDepth, int lowerBound, int upperBound)
+    private void SetWalls(int calculationDepth, int lowerBound, int upperBound, int porosity)
     {
         int[][] links = new int[][] { new int[] { 0, 43 }, new int[] { 2, 8, 14 }, new int[] { 3, 9, 15, 21 }, new int[] { 4, 10, 22 }, new int[] { 13, 19, 37 }, new int[] { 18, 30 }, new int[] { 20, 26, 38, 44 }, new int[] { 25, 31 }, new int[] { 27, 39, 45 }, new int[] { 28 }, new int[] { 32 }, new int[] { 33 }, new int[] { 35, 48 } };
 
         int[] options = links.Select(x => PickRandom(x, _rng)).ToArray();
 
-        Queue<bool[]> mazes = new Queue<bool[]>(Shuffle(_nerfedSetups.ToList(), _rng));
+        Queue<bool[]> mazes = new Queue<bool[]>(Shuffle(_nerfedSetups[porosity].ToList(), _rng));
 
         int finalStackDepth = calculationDepth - 1;
 
@@ -422,8 +429,14 @@ public class SpectreMazeTile
                 return;
             }
         }
+
+        _goalStack = null;
+        _tileStack = null;
+        for (int i = 0; i < 49; i++)
+            _edges[i / 7, i % 7] = false;
     }
 
+    /*
     private void SetWalls(int calculationDepth, float accessibility)
     {
         int[][] links = new int[][] { new int[] { 0, 43 }, new int[] { 2, 8, 14 }, new int[] { 3, 9, 15, 21 }, new int[] { 4, 10, 22 }, new int[] { 13, 19, 37 }, new int[] { 18, 30 }, new int[] { 20, 26, 38, 44 }, new int[] { 25, 31 }, new int[] { 27, 39, 45 }, new int[] { 28 }, new int[] { 32 }, new int[] { 33 }, new int[] { 35, 48 } };
@@ -485,6 +498,7 @@ public class SpectreMazeTile
             }
         }
     }
+    */
 
     private void UpdateRange()
     {
@@ -865,6 +879,9 @@ public class SpectreMazeTile
     //lowerbound is inclusive
     public static List<string> ParseStack(Stack<int> stack)
     {
+        if (stack == null)
+            return new List<string> { "Ω" };
+
         Stack<int> typeStack = new Stack<int>(stack);
 
         List<string> text = new List<string>();
@@ -890,6 +907,9 @@ public class SpectreMazeTile
 
     public static List<string> ParseStack(Stack<int> stack, List<bool> knownDepths)
     {
+        if (stack == null)
+            return new List<string> { "Ω" };
+
         Stack<int> typeStack = new Stack<int>(stack);
 
         List<string> text = new List<string>();
@@ -982,7 +1002,10 @@ public class SpectreMazeTile
 
         public MemoryPoint(Stack<int> currentLocation, List<bool> knownDepths, bool showAllData)
         {
-            Location = new Stack<int>(new Stack<int>(currentLocation).Skip(1));
+            if (currentLocation == null)
+                Location = null;
+            else
+                Location = new Stack<int>(new Stack<int>(currentLocation).Skip(1));
             KnownDepths = knownDepths;
             ShowAllData = showAllData;
         }
@@ -1223,7 +1246,7 @@ public class SpectreMazeTile
         return finalisedCandidates.OrderBy(x => x.Count(y => y)).ToList();
     }
 
-    private static bool[][] _nerfedSetups = null;
+    private static List<bool[][]> _nerfedSetups = new List<bool[][]>();
 
     //do not question these; GetAllWallSetups() has ran these for over 8 hours on layer 7 to try and maximise guarantee for full connectivity with no changes since layer 5 checks
     private static readonly bool[][] _possibleSetups = new bool[][]

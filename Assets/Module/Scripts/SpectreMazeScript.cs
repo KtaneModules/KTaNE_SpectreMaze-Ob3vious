@@ -1,9 +1,13 @@
-﻿using System.Collections;
+﻿using Newtonsoft.Json;
+using KTMissionGetter;
+using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using UnityEngine;
+using System.Text.RegularExpressions;
 
 public class SpectreMazeScript : MonoBehaviour
 {
@@ -16,6 +20,8 @@ public class SpectreMazeScript : MonoBehaviour
     }
 
     private static float _minHoldTime = 0.5f;
+
+    public KMModSettings _settings;
 
     private SpectreParticleManager _particles;
     private List<SpectreTextManager> _texts;
@@ -47,6 +53,8 @@ public class SpectreMazeScript : MonoBehaviour
 
     void Start()
     {
+        _settings = GetComponent<KMModSettings>();
+
         _maze = null;
 
         _state = ModuleState.Preparing;
@@ -84,6 +92,9 @@ public class SpectreMazeScript : MonoBehaviour
             text.Update();
         }
 
+        if (_maze.GetStack() == null)
+            return;
+
         if (_holding != -1 && _holdTimer < 1)
         {
             _holdTimer += Time.deltaTime / _minHoldTime;
@@ -114,12 +125,27 @@ public class SpectreMazeScript : MonoBehaviour
     {
         yield return new WaitForSecondsRealtime(UnityEngine.Random.Range(0.975f, 2f));
 
+        ModSettings settings = GetMissionSettings();
+        if (settings == null)
+            settings = GetSettings();
+        else
+            Log("Mission description has been recognised and will be used for this instance.");
+
         yield return new WaitWhile(() => _isUsingThreads);
         _isUsingThreads = true;
 
+        Log("The settings are: {0} goal layers, traversal score of {1}-{2} and porosity {3}.", settings.TargetLayerCount, settings.LowerScoreBound, settings.UpperScoreBound, settings.Porosity);
+
         _thread = new Thread(() =>
         {
-            _maze = SpectreMazeTile.Generate(4, 64, 80, rng);
+            try
+            {
+                _maze = SpectreMazeTile.Generate(settings.TargetLayerCount + 1, settings.LowerScoreBound, settings.UpperScoreBound, settings.Porosity, rng);
+            }
+            catch
+            {
+                Log("An exception has been thrown. Please contact the developer.");
+            }
         });
         _thread.Start();
 
@@ -136,6 +162,14 @@ public class SpectreMazeScript : MonoBehaviour
         {
             if (_state != ModuleState.Ready)
                 return false;
+
+            if (_maze.GetStack() == null)
+            {
+                moduleAudio.PlaySoundAtTransform("Solve", transform);
+                Log("The module has been solved!");
+                StartCoroutine(Solve());
+                return false;
+            }
 
             bool strike = false;
             if (_selected.Any(y => y))
@@ -251,6 +285,8 @@ public class SpectreMazeScript : MonoBehaviour
                 if (_state != ModuleState.Ready)
                     return;
 
+
+
                 for (int j = 0; j < 14; j++)
                     _buttons[j].Extended = _selected[j] ? 0.75f : 1;
 
@@ -265,9 +301,15 @@ public class SpectreMazeScript : MonoBehaviour
                 if (_holdTimer >= 1)
                     return;
 
-                SpectreMazeTile.TraversalData traversal = _maze.Move(x);
+                bool strike = _maze.GetStack() == null;
+                SpectreMazeTile.TraversalData traversal = new SpectreMazeTile.TraversalData(null, null, x, -1, -1, null);
 
-                bool strike = traversal.TravelPermission == null || !(bool)traversal.TravelPermission;
+                if (!strike)
+                {
+                    traversal = _maze.Move(x);
+
+                    strike = traversal.TravelPermission == null || !(bool)traversal.TravelPermission;
+                }
 
                 float angleRad = (15 - SpectreButton.Orientations[x]) / 180f * Mathf.PI;
                 float windStrength = 0.1f / 60;
@@ -277,8 +319,9 @@ public class SpectreMazeScript : MonoBehaviour
                 if (strike)
                 {
                     moduleAudio.PlaySoundAtTransform("MinThird" + new string[] { "C", "Csharp", "D", "Dsharp", "E", "F", "Fsharp", "G", "Gsharp", "A" }.PickRandom(), transform);
-
-                    if (traversal.ToTile == null)
+                    if (traversal.FromTile == null)
+                        Log("A strike was dealt for attempting to traverse while being nowhere.");
+                    else if (traversal.ToTile == null)
                         Log("A strike was dealt for hitting a wall while attempting to traverse through edge {0}, as there is nothing there? The current position is {1}.", traversal.EntryEdge, SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
                     else if (traversal.TravelPermission == null)
                         Log("A strike was dealt for entering the unknown while attempting to traverse through edge {0}. Try expanding your range. The current position is {1}.", traversal.EntryEdge, SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"));
@@ -311,10 +354,17 @@ public class SpectreMazeScript : MonoBehaviour
         _texts.Add(new SpectreTextCycle(Instantiate(_textRef, _textRef.transform.parent), _maze, new Vector3(-0.025f, 0.0351f, 0.05f), new Vector3(-0.025f, 0.0351f, -0.05f), 0.005f));
         _texts.Add(new SpectreTextSingle(Instantiate(_textRef, _textRef.transform.parent), _maze, new Vector3(0.045f, 0.0351f, -0.05f), 0.01f));
 
-        Log("Spawning on {0}. The goal is any tile with the coordinate {1}.", SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"), SpectreMazeTile.ParseStack(_maze.GetGoal()).Join("-"));
-        Log("The module currently displays {0}.", _maze.GetMemoryText().SkipWhile(x => x == "?").Join("-"));
+        if (_maze.GetGoal() == null)
+        {
+            Log("The module could not generate any valid configuration. Pressing submit will solve the module.", SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"), SpectreMazeTile.ParseStack(_maze.GetGoal()).Join("-"));
+        }
+        else
+        {
+            Log("Spawning on {0}. The goal is any tile with the coordinate {1}.", SpectreMazeTile.ParseStack(_maze.GetStack()).Join("-"), SpectreMazeTile.ParseStack(_maze.GetGoal()).Join("-"));
+            Log("The module currently displays {0}.", _maze.GetMemoryText().SkipWhile(x => x == "?").Join("-"));
 
-        Log("The edge pairs that can be traversed through in this maze are: {0}.", _maze.GetAllEdgePairs().Join(", "));
+            Log("The edge pairs that can be traversed through in this maze are: {0}.", _maze.GetAllEdgePairs().Join(", "));
+        }
 
         _buttons.ForEach(x => x.Extended = 1);
 
@@ -610,5 +660,111 @@ public class SpectreMazeScript : MonoBehaviour
     private void Log(string format, params object[] args)
     {
         Debug.LogFormat("[{0} #{1}] {2}", _moduleName, _moduleId, string.Format(format, args));
+    }
+
+
+
+    public class ModSettings
+    {
+        public int TargetLayerCount = 3;
+        public int LowerScoreBound = 64;
+        public int UpperScoreBound = 80;
+        public int Porosity = 1;
+    }
+
+    public ModSettings GetSettings()
+    {
+        try
+        {
+            bool changed = false;
+            ModSettings settings = JsonConvert.DeserializeObject<ModSettings>(_settings.Settings);
+            if (settings.TargetLayerCount < 1)
+            {
+                settings.TargetLayerCount = 1;
+                changed = true;
+            }
+
+            if (settings.LowerScoreBound < 0)
+            {
+                settings.LowerScoreBound = 0;
+                changed = true;
+            }
+
+            if (settings.UpperScoreBound <= settings.LowerScoreBound)
+            {
+                settings.UpperScoreBound = settings.LowerScoreBound + 1;
+                changed = true;
+            }
+
+            if (settings.Porosity < 0)
+            {
+                settings.Porosity = 0;
+                changed = true;
+            }
+            if (settings.Porosity > 10)
+            {
+                settings.Porosity = 10;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                File.WriteAllText(_settings.SettingsPath, JsonConvert.SerializeObject(settings));
+            }
+
+            return settings;
+        }
+        catch
+        {
+            ModSettings settings = new ModSettings();
+            File.WriteAllText(_settings.SettingsPath, JsonConvert.SerializeObject(settings));
+            return settings;
+        }
+    }
+
+
+
+    public ModSettings GetMissionSettings()
+    {
+        string missionDesc = Mission.Description;
+        if (missionDesc == null)
+            return null;
+
+        Regex regex = new Regex(@"\[Spectre Maze\]:\d+;\d+-\d+;\d+");
+        var match = regex.Match(missionDesc);
+        if (!match.Success)
+            return null;
+
+        string[] options = match.Value.Replace("[Spectre Maze]:", "").Split(';');
+
+        ModSettings setting = new ModSettings();
+
+        int a;
+        if (!int.TryParse(options[0], out a))
+            return null;
+        if (a < 1)
+            return null;
+
+        setting.TargetLayerCount = a;
+
+        int b;
+        if (!int.TryParse(options[1].Split('-')[0], out a))
+            return null;
+        if (!int.TryParse(options[1].Split('-')[1], out b))
+            return null;
+        if (a < 0 || b <= a)
+            return null;
+
+        setting.LowerScoreBound = a;
+        setting.UpperScoreBound = b;
+
+        if (!int.TryParse(options[2], out a))
+            return null;
+        if (a < 0 || a > 10)
+            return null;
+
+        setting.Porosity = a;
+
+        return setting;
     }
 }

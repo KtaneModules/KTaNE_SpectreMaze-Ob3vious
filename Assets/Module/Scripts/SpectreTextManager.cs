@@ -25,6 +25,7 @@ public abstract class SpectreTextManager
         _colourRefs.Add('Φ', new Color32(0xff, 0xe0, 0xc0, 0x00));
         _colourRefs.Add('Ψ', new Color32(0xff, 0xff, 0xc0, 0x00));
         _colourRefs.Add('?', new Color32(0xe0, 0xe0, 0xe0, 0x00));
+        _colourRefs.Add('Ω', new Color32(0xff, 0xff, 0xff, 0x00));
     }
 
     public SpectreTextManager(SpectreText refText, SpectreMazeTile tile)
@@ -79,7 +80,12 @@ public class SpectreTextCycle : SpectreTextManager
     protected override void UpdateText()
     {
         float timeSpan = 1.5f;
-        Timer %= timeSpan;
+        if (Timer >= timeSpan)
+        {
+            _lastIteration = -1;
+            Timer %= timeSpan;
+        }
+        
 
         //these are moments where I wish this version of c# had null-propagation
         List<string> memoryText = Tile.GetMemoryText();
