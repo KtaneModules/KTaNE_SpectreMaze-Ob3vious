@@ -12,4 +12,6 @@ These values are in order:
 - The upper bound on the distance (scored by calculation difficulty), exclusive. Must be greater that the lower bound.
 - The maze porosity, or how many extra useful openings are added to a minimal maze. Must be within the range of 0-10, both bounds inclusive.
 
-If any of these constraints are not followed, the module will ignore the setting. If it has been done correctly, a test run should reveal so in the logfile.
+If everything is set up correctly, a test run should reveal so in the logfile. If not, mod settings will be relied on instead.
+
+Not putting any settings on your mission may allow a player to cheese the module, so it is recommended to put settings on any mission you wish to put this module on.
