@@ -325,9 +325,13 @@ public class SpectreMazeTile
         }
     }
 
-    public int TransitionScore(int layer)
+    private static List<int> _layerScores = new List<int> { 0, 1 };
+    public static int TransitionScore(int layer)
     {
-        return layer * (layer + 1) / 2 + 1;
+        if (layer < _layerScores.Count)
+            return _layerScores[layer];
+        _layerScores.Add(2 * TransitionScore(layer - 2) + 3 * TransitionScore(layer - 1));
+        return _layerScores.Last();
     }
     private void SetWalls(int calculationDepth, int lowerBound, int upperBound, int porosity)
     {
