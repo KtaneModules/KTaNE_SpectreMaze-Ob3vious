@@ -30,7 +30,7 @@ public class SpectreText : MonoBehaviour
         else if (_currentOpacity < Opacity)
         {
             _currentOpacity += speed * Time.deltaTime;
-            if (_currentOpacity > Opacity)
+            if (_currentOpacity >= Opacity)
             {
                 _currentOpacity = 2 * Opacity - _currentOpacity;
                 Opacity = 0;
